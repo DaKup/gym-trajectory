@@ -8,9 +8,9 @@ from gym.envs.classic_control import rendering
 
 
 class TrajectoryEnv(gym.Env, utils.EzPickle):
+    """Custom environment for OpenAI gym
     """
-    """
-    metadata = {'render.modes': ['console', 'file', 'human']}
+    metadata = {'render.modes': ['ansi', 'rgb_array', 'human']}
 
     VIEWER_WIDTH = 600
     VIEWER_HEIGHT = 400
@@ -29,13 +29,12 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         self,
         num_dimensions = 2,
         num_observables = 5,
+        max_targets = 100,
         max_position = 100.0,
         max_acceleration = 10.1,
         max_velocity = 2.0,
         collision_epsilon = 25.0
         ) -> None:
-        '''
-        '''
         super().__init__()
 
         self.num_dimensions = num_dimensions
@@ -67,6 +66,9 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             (self.position_space, self.velocity_space, self.target_space)
         )
 
+        self.max_targets = max_targets
+        self.num_targets = 0
+        self.previous_distance = 0.0
         self.agent_position = None
         self.agent_velocity = None
         self.target_position = None
@@ -107,7 +109,6 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         """
         info = {}
         reward = 0.0
-        self.done = False
 
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
@@ -120,12 +121,21 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             self.position_space.low, self.position_space.high)
 
         target_distance = np.linalg.norm(self.agent_position - self.target_position[0])
+        max_distance = np.linalg.norm(self.position_space.high - self.position_space.low)
 
-        reward = 1/(target_distance + 1)
+        if target_distance < self.previous_distance:
+            reward = max_distance/(target_distance + 1)
+            self.previous_distance = target_distance
+        else:
+            reward = -max_distance/(target_distance + 1)
 
         if target_distance < self.collision_epsilon:
             reward *= 2
             self.target_position = self.target_position[1:] + (self.position_space.sample(),)
+            self.previous_distance = np.linalg.norm(self.agent_position - self.target_position[0])
+            self.num_targets += 1
+            if self.num_targets >= self.max_targets:
+                self.done = True
 
         reward = np.clip(reward, self.reward_range[0], self.reward_range[1])
         observation = (self.agent_position, self.agent_velocity, self.target_position)
@@ -147,7 +157,10 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             observation (object): the initial observation.
         """
 
+        self.done = False
+        self.num_targets = 0
         self.agent_position, self.agent_velocity, self.target_position = self.observation_space.sample()
+        self.previous_distance = np.linalg.norm(self.agent_position - self.target_position[0])
         return (self.agent_position, self.agent_velocity, self.target_position)
 
 
@@ -168,7 +181,7 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             mode (str): the mode to render with
         """
         if mode == 'ansi':
-            pass
+            print("distance: {}".format(np.linalg.norm(self.agent_position - self.target_position[0])))
         elif (mode == 'human' or mode == 'rgb_array') and self.num_dimensions == 2:
             
             if self.viewer is None:
@@ -200,16 +213,26 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
                     self.viewer_observable.append(observable)
                     self.viewer_observable_transform.append(observable_transform)
 
-            self.viewer_agent_transform.set_translation(*(self.viewer_scale * (self.agent_position + self.viewer_offset)))
-            self.viewer_target_transform.set_translation(*(self.viewer_scale * (self.target_position[0] + self.viewer_offset)))
+            self.viewer_agent_transform.set_translation(
+                *(self.viewer_scale * (self.agent_position + self.viewer_offset)))
+            self.viewer_target_transform.set_translation(
+                *(self.viewer_scale * (self.target_position[0] + self.viewer_offset)))
             
-            line = rendering.Line(start=(self.viewer_scale * (self.agent_position + self.viewer_offset)), end=(self.viewer_scale * (self.target_position[0] + self.viewer_offset)))
+            line = rendering.Line(
+                start=(self.viewer_scale * (self.agent_position + self.viewer_offset)),
+                end=(self.viewer_scale * (self.target_position[0] + self.viewer_offset)))
             self.viewer.add_onetime(line)
             for idx, observable_transform in enumerate(self.viewer_observable_transform):
-                self.viewer_observable[idx].set_color(0, 1 - idx * 1/len(self.viewer_observable_transform), idx * 1/len(self.viewer_observable_transform))
-                observable_transform.set_translation(*(self.viewer_scale * (self.target_position[idx+1] + self.viewer_offset)))
+                self.viewer_observable[idx].set_color(
+                    0,
+                    1 - idx * 1/len(self.viewer_observable_transform),
+                    idx * 1/len(self.viewer_observable_transform))
+                observable_transform.set_translation(
+                    *(self.viewer_scale * (self.target_position[idx+1] + self.viewer_offset)))
 
-                line = rendering.Line(start=(self.viewer_scale * (self.target_position[idx] + self.viewer_offset)), end=(self.viewer_scale * (self.target_position[idx+1] + self.viewer_offset)))
+                line = rendering.Line(
+                    start=(self.viewer_scale * (self.target_position[idx] + self.viewer_offset)),
+                    end=(self.viewer_scale * (self.target_position[idx+1] + self.viewer_offset)))
                 self.viewer.add_onetime(line)
 
             return self.viewer.render(return_rgb_array = mode == 'rgb_array')
