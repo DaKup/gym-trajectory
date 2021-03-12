@@ -11,5 +11,5 @@ observation = env.reset()
 
 while True:
     (observation, reward, done, info) = env.step(env.action_space.sample())
-    env.render(mode='human')
+    env.render()
 ```
