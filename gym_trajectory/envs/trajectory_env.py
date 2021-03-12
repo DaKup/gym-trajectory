@@ -13,7 +13,7 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
     metadata = {'render.modes': ['ansi', 'rgb_array', 'human']}
 
     VIEWER_WIDTH = 600
-    VIEWER_HEIGHT = 400
+    VIEWER_HEIGHT = 600
 
     AGENT_COLOR = (1, 0, 0)
     AGENT_SIZE = 5
@@ -21,7 +21,7 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
     TARGET_COLOR = (0, 1, 0)
     TARGET_SIZE = 5
 
-    OBSERVABLE_COLOR = (0, 0, 1)
+    OBSERVABLE_COLOR = (0, 1, 0)
     OBSERVABLE_SIZE = 3
 
 
@@ -30,16 +30,34 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         num_dimensions = 2,
         num_observables = 5,
         max_targets = 100,
+        max_steps = 5000,
+        max_steps_without_target = 1000,
         max_position = 100.0,
-        max_acceleration = 10.1,
-        max_velocity = 2.0,
-        collision_epsilon = 25.0
+        max_acceleration = 0.2,
+        max_velocity = 5.0,
+        collision_epsilon = 10.0
         ) -> None:
         super().__init__()
 
+        # description:
         self.num_dimensions = num_dimensions
         self.num_observables = num_observables
+        self.max_targets = max_targets
+        self.max_steps = max_steps
+        self.max_steps_without_target = max_steps_without_target
+        self.collision_epsilon = collision_epsilon
+
+        # current state:
+        self.num_targets = 0
+        self.num_steps = -1
+        self.num_steps_without_target = -1
+        self.previous_distance = 0.0
+        self.agent_position = None
+        self.agent_velocity = None
+        self.target_position = None
+        self.done = False
         
+        # ranges:
         self.action_space = gym.spaces.Box(
             low = -max_acceleration,
             high = max_acceleration,
@@ -66,16 +84,7 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             (self.position_space, self.velocity_space, self.target_space)
         )
 
-        self.max_targets = max_targets
-        self.num_targets = 0
-        self.previous_distance = 0.0
-        self.agent_position = None
-        self.agent_velocity = None
-        self.target_position = None
-        self.done = False
-        self.collision_epsilon = collision_epsilon
-
-
+        # viewer:
         self.viewer = None
         self.viewer_offset = (max_position, max_position)
         self.viewer_scale = (self.VIEWER_WIDTH / (2*max_position), self.VIEWER_HEIGHT / (2*max_position))
@@ -110,6 +119,10 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         info = {}
         reward = 0.0
 
+        if self.done:
+            observation = (self.agent_position, self.agent_velocity, self.target_position)
+            return (observation, reward, self.done, info)
+
         action = np.clip(action, self.action_space.low, self.action_space.high)
 
         self.agent_velocity = np.clip(
@@ -130,12 +143,21 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             reward = -max_distance/(target_distance + 1)
 
         if target_distance < self.collision_epsilon:
+            self.num_steps_without_target = -1
             reward *= 2
             self.target_position = self.target_position[1:] + (self.position_space.sample(),)
             self.previous_distance = np.linalg.norm(self.agent_position - self.target_position[0])
             self.num_targets += 1
             if self.num_targets >= self.max_targets:
                 self.done = True
+
+        self.num_steps += 1
+        if self.num_steps >= self.max_steps:
+            self.done = True
+
+        self.num_steps_without_target += 1
+        if self.num_steps_without_target >= self.max_steps_without_target:
+            self.done = True
 
         reward = np.clip(reward, self.reward_range[0], self.reward_range[1])
         observation = (self.agent_position, self.agent_velocity, self.target_position)
@@ -159,6 +181,8 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
 
         self.done = False
         self.num_targets = 0
+        self.num_steps = -1
+        self.num_steps_without_target = -1
         self.agent_position, self.agent_velocity, self.target_position = self.observation_space.sample()
         self.previous_distance = np.linalg.norm(self.agent_position - self.target_position[0])
         return (self.agent_position, self.agent_velocity, self.target_position)
