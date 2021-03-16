@@ -1,6 +1,8 @@
 # gym-trajectory
 Custom environment for OpenAI gym
 
+N-dimensional trajectory
+
 
 ```py
 import gym
@@ -13,3 +15,5 @@ while True:
     (observation, reward, done, info) = env.step(env.action_space.sample())
     env.render()
 ```
+
+![](gifs/demo.gif)

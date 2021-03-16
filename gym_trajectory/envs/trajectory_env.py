@@ -33,7 +33,7 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         max_steps = 5000,
         max_steps_without_target = 1000,
         max_position = 100.0,
-        max_acceleration = 0.2,
+        max_acceleration = 2.5,
         max_velocity = 5.0,
         collision_epsilon = 10.0
         ) -> None:
@@ -123,10 +123,10 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             observation = (self.agent_position, self.agent_velocity, self.target_position)
             return (observation, reward, self.done, info)
 
-        action = np.clip(action, self.action_space.low, self.action_space.high)
+        acceleration = np.clip(action, self.action_space.low, self.action_space.high)
 
         self.agent_velocity = np.clip(
-            self.agent_velocity * action,
+            self.agent_velocity + acceleration,
             self.velocity_space.low, self.velocity_space.high)
 
         self.agent_position = np.clip(
