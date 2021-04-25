@@ -1,6 +1,8 @@
 # gym-trajectory
 Custom environment for OpenAI gym
 
+```pip install gym-trajectory```
+
 N-dimensional trajectory
 
 
