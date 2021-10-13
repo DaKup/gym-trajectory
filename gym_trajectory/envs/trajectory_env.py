@@ -1,30 +1,26 @@
-from gym.spaces.box import Box
 import numpy as np
 import gym
-from gym import utils
 import gym.spaces
-from gym.utils import seeding
-# from gym.envs.classic_control import rendering
-from typing import Union, Sequence, Optional, Any, Type
+import gym.utils
 
 
 
-class TrajectoryEnv(gym.Env, utils.EzPickle):
+class TrajectoryEnv(gym.Env, gym.utils.EzPickle):
     """Custom environment for OpenAI gym
     """
     metadata = {'render.modes': ['ansi', 'rgb_array', 'human']}
 
+
+    # Rendering:
     VIEWER_WIDTH = 600
     VIEWER_HEIGHT = 600
-
     AGENT_COLOR = (1, 0, 0)
     AGENT_SIZE = 5
-
     TARGET_COLOR = (0, 1, 0)
     TARGET_SIZE = 5
-
     OBSERVABLE_COLOR = (0, 1, 0)
     OBSERVABLE_SIZE = 3
+
 
 
     def __init__(
@@ -37,7 +33,8 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         max_position = 100.0,
         max_acceleration = 2.5,
         max_velocity = 5.0,
-        collision_epsilon = 10.0
+        collision_epsilon = 10.0,
+        termination_border = True
         ) -> None:
         super().__init__()
 
@@ -48,6 +45,7 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         self.max_steps = max_steps
         self.max_steps_without_target = max_steps_without_target
         self.collision_epsilon = collision_epsilon
+        self.termination_border = termination_border
 
 
         # spaces:
@@ -69,118 +67,71 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             shape = (self.num_dimensions,)
         )
 
-        # player_position; player_velocity; target_position(s)
         self.observation_space = gym.spaces.Box(
             low=np.concatenate([
+                
+                # player_position:
                 np.full(
                     shape=num_dimensions,
                     fill_value=-max_position,
                     dtype=np.float32),
+                
+                # player_velocity:
                 np.full(
                     shape=num_dimensions,
                     fill_value=-max_velocity,
                     dtype=np.float32),
+                
+                # target_position:
                 np.full(
                     shape=num_dimensions * num_observables,
                     fill_value=-max_position,
                     dtype=np.float32)]),
+
             high=np.concatenate([
+
+                # player_position:
                 np.full(
                     shape=num_dimensions,
                     fill_value=max_position,
                     dtype=np.float32),
+
+                # player velocity:
                 np.full(
                     shape=num_dimensions,
                     fill_value=max_velocity,
                     dtype=np.float32),
+
+                # target position:
                 np.full(
                     shape=num_dimensions * num_observables,
                     fill_value=max_position,
                     dtype=np.float32)]))
 
-        # observation_low = np.concatenate([
-        #     np.full(
-        #         shape=num_dimensions,
-        #         fill_value=-max_position,
-        #         dtype=np.float32),
-        #     np.full(
-        #         shape=num_dimensions,
-        #         fill_value=-max_velocity,
-        #         dtype=np.float32),
-        #     np.full(
-        #         shape=num_dimensions * num_observables,
-        #         fill_value=-max_position,
-        #         dtype=np.float32)])
-
-        # position_idx = slice(
-        #     0,
-        #     number_of_position_features)
-        # velocity_idx = slice(
-        #     number_of_position_features,
-        #     number_of_position_features + number_of_velocity_features)
-        # target_idx = slice(
-        #     number_of_position_features + number_of_velocity_features,
-        #     number_of_position_features + number_of_velocity_features + number_of_target_features)
-
-        # observation_low = np.empty(shape=0, dtype=np.float32)
-        # observation_high = np.empty_like(observation_low)
-
-        # observation_low[position_idx] = -max_position
-        # observation_high[position_idx] = max_position
-        # observation_low[velocity_idx] = -max_velocity
-        # observation_high[velocity_idx] = max_velocity
-        # observation_low[target_idx] = -max_position
-        # observation_high[target_idx] = max_position
-
-        # self.observation_space = gym.spaces.Box(
-        #     low=observation_low, high=observation_high)
-
 
         # current state:
+        self.done = False
         self.num_targets = 0
         self.num_steps = -1
         self.num_steps_without_target = -1
         self.previous_distance = 0.0
+
         self.observation = self.observation_space.sample()
         self.agent_position = self.observation[0:num_dimensions]
         self.agent_velocity = self.observation[num_dimensions:2*num_dimensions]
-        # self.target_position = self.observation[2*num_dimensions:2*num_dimensions + num_dimensions * num_observables]
-        
-        self.target_position = []
-        for i in range(num_observables):
-            self.target_position.append(self.observation[2*num_dimensions + i * num_dimensions: 2*num_dimensions + (i+1) * num_dimensions])
-        
-        self.done = False
-        
-        # ranges:
+        self.target_position = [
+            self.observation[2*num_dimensions + i * num_dimensions : 2*num_dimensions + (i+1) * num_dimensions]
+            for i in range(num_observables)]
 
-        # self.target_space = gym.spaces.Tuple(
-        #     [self.position_space for _ in range(self.num_observables)]
-        # )
-
-        # self.observation_space = gym.spaces.Tuple(
-        #     (self.position_space, self.velocity_space, self.target_space)
-        # )
-
-        # observation_space_low = np.empty(shape=(
-        #     self.position_space.sample().shape[0] +
-        #     self.velocity_space.sample().shape[0] +
-        #     self.target_space.sample().shape[0]
-        #     )
-
-        # self.observation_space = gym.spaces.Box(low=np.array([0, 0]), high=np.array([1, 1]))
 
         # viewer:
         self.viewer = None
         self.viewer_offset = (max_position, max_position)
         self.viewer_scale = (self.VIEWER_WIDTH / (2*max_position), self.VIEWER_HEIGHT / (2*max_position))
-
         self.viewer_agent = None
         self.viewer_agent_transform = None
-
         self.viewer_target = None
         self.viewer_target_transform = None
-
         self.viewer_observable = []
         self.viewer_observable_transform = []
 
@@ -206,9 +157,13 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
         reward = 0.0
 
         if self.done:
-            # observation = (self.agent_position, self.agent_velocity, self.target_position)
-            # observation = self.observation
             return (self.observation, reward, self.done, info)
+        
+        if self.termination_border:
+
+            if np.any(np.abs(self.agent_position) >= self.position_space.high):
+                self.done = True
+                return (self.observation, reward, self.done, info)
 
         acceleration = np.clip(action, self.action_space.low, self.action_space.high)
 
@@ -303,7 +258,6 @@ class TrajectoryEnv(gym.Env, utils.EzPickle):
             
             if self.viewer is None:
 
-            
                 # viewer:
                 self.viewer = rendering.Viewer(self.VIEWER_WIDTH, self.VIEWER_HEIGHT)
                 
